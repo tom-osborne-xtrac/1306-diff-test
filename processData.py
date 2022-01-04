@@ -14,8 +14,6 @@ import csv
 import numpy as np
 from scipy.ndimage.filters import uniform_filter1d
 
-# This is a comment
-
 
 # -------------------------------------------------------------------------------------- #
 def smooth(x, window_len, window='hanning'):
@@ -90,6 +88,20 @@ data_IPSpeed1 = []          # IP Speed 1 [rpm]
 data_IPTorque1 = []         # IP Torque 1 [Nm]
 data_ActualGearNo = []      # Actual gear number [#]
 
+# Attempt to do the above but with pandas dataframe
+data_df = pd.read_csv(filePath, sep=",", header=3)
+# print(data_df['Event Time'])
+
+gear_ratios = {
+    1: 12.803,
+    2: 9.267,
+    3: 7.058,
+    4: 5.581,
+    5: 4.562,
+    6: 3.878,
+    7: 3.435
+}
+
 with open(filePath, 'r') as csv_file:
     csv_reader = csv.reader(csv_file, delimiter=',')
 
@@ -116,7 +128,7 @@ with open(filePath, 'r') as csv_file:
             data_AvgTotalOPTrq.append(float(row[6]))   # Avg Total Output Torque [Nm]
             data_IPSpeed1.append(float(row[7]))        # IP Speed 1 [rpm]
             data_IPTorque1.append(float(row[8]))       # IP Torque 1 [Nm]
-            data_ActualGearNo.append(row[9])     # Actual gear number [#]
+            data_ActualGearNo.append(row[9])           # Actual gear number [#]
         row_count += 1
 
 
@@ -133,7 +145,18 @@ print("Sample rate:", sample_rate, "Hz")
 # Gear used
 count_Gears = {i: data_ActualGearNo.count(i) for i in data_ActualGearNo if i != ""}
 actualGear = [int(k) for k, v in count_Gears.items() if v == max(count_Gears.values())]
-print("Gears:", count_Gears, actualGear)
+gears_hr = {
+    1: "1st",
+    2: "2nd",
+    3: "3rd",
+    4: "4th",
+    5: "5th",
+    6: "6th",
+    7: "7th"
+}
+actualGear_hr = gears_hr[actualGear[0]]
+print("Gears:", count_Gears, actualGear, actualGear_hr)
+
 
 # Input torque gradient, used for detecting ramp sections
 calc_IPTrqGradient = np.gradient(uniform_filter1d(data_IPTorque1, size=int(sample_rate)), edge_order=2) * 10
@@ -143,15 +166,6 @@ calc_IPTrqGradient_smoothed = smooth(calc_IPTrqGradient, sample_rate+1)
 calc_AxleTrqFromInput = []
 
 # Lookup for the actual gear
-gear_ratios = {
-    1: 12.803,
-    2: 9.267,
-    3: 7.058,
-    4: 5.581,
-    5: 4.562,
-    6: 3.878,
-    7: 3.435  # 7th gear
-}
 gear_ratio = gear_ratios[actualGear[0]]
 for i in range(len(data_IPTorque1)):
     calc = data_IPTorque1[i] * gear_ratio
@@ -315,18 +329,20 @@ for i in range(len(data_filtered_LockTrqR)):
 
     if time_between_points > 1 or i == len(data_filtered_LockTrqR)-1:
         # Found the end of the 'group', so calculate average of current temporary lists
-        if len(data_temp_AxleTrqFromOP_R) > 0:
-            avg_AxleTrqFromOP_R = round(sum(data_temp_AxleTrqFromOP_R) / len(data_temp_AxleTrqFromOP_R), 3)
+        if len(data_temp_AxleTrqFromOP_R) > 0 and len(data_temp_AxleTrqFromOP_R) > sample_rate:
+            sum_avg = sum(data_temp_AxleTrqFromOP_R[sample_rate:]) / len(data_temp_AxleTrqFromOP_R[sample_rate:])
+            avg_AxleTrqFromOP_R = round(sum_avg, 3)
             data_plot_AxleTrqFromOP_R.append(avg_AxleTrqFromOP_R)
         else:
             continue
         if len(data_temp_AxleTrqFromIP_R) > 0:
-            avg_AxleTrqFromIP_R = round(sum(data_temp_AxleTrqFromIP_R) / len(data_temp_AxleTrqFromIP_R), 3)
+            sum_avg = sum(data_temp_AxleTrqFromIP_R[sample_rate:]) / len(data_temp_AxleTrqFromIP_R[sample_rate:])
+            avg_AxleTrqFromIP_R = round(sum_avg, 3)
             data_plot_AxleTrqFromIP_R.append(avg_AxleTrqFromIP_R)
         else:
             continue
         if len(data_temp_LockTrq_R) > 0:
-            avg_LockTrq_R = round(sum(data_temp_LockTrq_R) / len(data_temp_LockTrq_R), 3)
+            avg_LockTrq_R = round(sum(data_temp_LockTrq_R[sample_rate:]) / len(data_temp_LockTrq_R[sample_rate:]), 3)
             data_plot_LockTrq_R.append(avg_LockTrq_R)
         else:
             continue
@@ -347,29 +363,38 @@ data_plot_RH['LockTrq'] = data_plot_LockTrq_R
 data_plot_RH = data_plot_RH.sort_values('AxleTrqFromOP')
 print(data_plot_RH)
 
+
+# TODO: clean up graphs and plot to PDF report
+
 # Fig 1 - Plot Raw Data & Overlay Filtered Data
 # ---------------------- #
-fig, ax = plt.subplots(2)
+fig, ax = plt.subplots(3)
 
 # Fig 1, Plot 1 - Input Torque & Gradient
-ax[0].plot(data_EventTime, data_IPTorque1, color="green", label="IPTrq", marker=None)
+ax[0].plot(
+    data_EventTime,
+    data_IPTorque1,
+    color="green",
+    label="IPTrq",
+    marker=None
+)
 
 axSecondary = ax[0].twinx()
 axSecondary.plot(
     data_EventTime,
     calc_IPTrqGradient,
     color="lightgrey",
-    label="IPTrqDelta",
+    label="IPTrq Gradient",
     marker=None
 )
 axSecondary.plot(
     data_EventTime,
     calc_IPTrqGradient_smoothed,
     color="darkolivegreen",
-    label="IPTrqDelta",
+    label="IPTrq Gradient Smoothed",
     marker=None
 )
-ax[0].set_title("Input Torque & Input Torque Delta")
+ax[0].set_title("Input Torque & Input Torque Delta", loc='left')
 ax[0].grid()
 ax[0].legend(loc=2)
 ax[0].set_xlim([0, max_data_EventTime])
@@ -378,6 +403,7 @@ ax[0].set_ylim([-300, 300])
 # axSecondary.set_ylim([-2, 2])
 axSecondary.legend(loc=1)
 ax[0].set_ylabel("Torque [Nm]")
+fig.suptitle(f'Diff Test Overview - {actualGear_hr} Gear', fontsize=16)
 
 # Fig 1, Plot 2 - Axle Torque, Speed and Filtered Data
 axSecondary2 = ax[1].twinx()
@@ -416,13 +442,29 @@ ax[1].scatter(
     marker=".",
     zorder=1
 )
-ax[1].set_title("Output Torque, Output Speed Delta & Filtered Data")
+ax[1].set_title("Output Torque, Output Speed Delta & Filtered Data", loc='left')
 ax[1].grid()
 ax[1].legend(loc=2)
 ax[1].set_xlim([0, max_data_EventTime])
 ax[1].set_xlabel("Time [s]")
 ax[1].set_ylim([-1000, 1000])
 ax[1].set_ylabel("Torque [Nm]")
+
+# Fig 1, Plot 3 - Input Speed
+ax[2].plot(
+    data_EventTime,
+    data_IPSpeed1,
+    color="red",
+    label="IP Speed",
+    marker=None
+)
+ax[2].set_title("Input Speed", loc='left')
+ax[2].grid()
+ax[2].legend(loc=2)
+ax[2].set_xlim([0, max_data_EventTime])
+ax[2].set_xlabel("Time [s]")
+# ax[2].set_ylim([0, 200])
+ax[2].set_ylabel("Speed [rpm]")
 
 # Fig 2, Plot 1 - Diff characterisation plot
 fig2, ax2 = plt.subplots()
